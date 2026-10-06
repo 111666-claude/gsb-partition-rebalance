@@ -20,31 +20,43 @@ def node_load(placements, counter=None):
 def plan(placements, caps, budget, counter):
     """从超容量节点往外搬分片，返回搬迁列表。"""
     load = node_load(placements, counter)
+    by_node = {}
+    for name, node in placements.items():
+        by_node.setdefault(node, []).append(name)
+    for shards in by_node.values():
+        shards.sort(reverse=True)
+    nodes = list(caps)
+    src_i = 0
+    dst_i = 0
     moves = []
-    while True:
-        src = None
-        for node in caps:
+    while len(moves) < budget:
+        while src_i < len(nodes):
             counter.scanned += 1
-            if load.get(node, 0) > caps[node]:
-                src = node
+            if load.get(nodes[src_i], 0) > caps[nodes[src_i]]:
                 break
-        if src is None:
+            src_i += 1
+        if src_i >= len(nodes):
             break
-        shard = None
-        for name, node in placements.items():
+        src = nodes[src_i]
+        stack = by_node.get(src)
+        if not stack:
+            src_i += 1
+            continue
+        while dst_i < len(nodes):
             counter.scanned += 1
-            if node == src and (shard is None or name < shard):
-                shard = name
-        dst = None
-        for node in caps:
-            counter.scanned += 1
-            if node != src:
-                dst = node
+            dst = nodes[dst_i]
+            if dst != src and load.get(dst, 0) < caps[dst]:
                 break
-        if shard is None or dst is None:
+            dst_i += 1
+        if dst_i >= len(nodes):
             break
+        dst = nodes[dst_i]
+        shard = stack.pop()
+        counter.scanned += 1
         moves.append({"shard": shard, "src": src, "dst": dst})
         load[src] = load.get(src, 0) - 1
+        load[dst] = load.get(dst, 0) + 1
+        by_node.setdefault(dst, []).append(shard)
     return moves
 
 
