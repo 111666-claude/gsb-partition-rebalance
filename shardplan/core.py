@@ -19,32 +19,40 @@ def node_load(placements, counter=None):
 
 def plan(placements, caps, budget, counter):
     """从超容量节点往外搬分片，返回搬迁列表。"""
-    load = node_load(placements, counter)
+    load = {}
+    by_node = {}
+    for name, node in placements.items():
+        counter.scanned += 1
+        load[node] = load.get(node, 0) + 1
+        by_node.setdefault(node, []).append(name)
+    for names in by_node.values():
+        names.sort()
+
+    receivers = []
+    for node in caps:
+        counter.scanned += 1
+        spare = caps[node] - load.get(node, 0)
+        if spare > 0:
+            receivers.append([node, spare])
+
     moves = []
-    while True:
-        src = None
-        for node in caps:
-            counter.scanned += 1
-            if load.get(node, 0) > caps[node]:
-                src = node
+    ridx = 0
+    for src in caps:
+        counter.scanned += 1
+        excess = load.get(src, 0) - caps[src]
+        if excess <= 0:
+            continue
+        for shard in by_node.get(src, ()):
+            if excess == 0 or len(moves) >= budget:
                 break
-        if src is None:
-            break
-        shard = None
-        for name, node in placements.items():
-            counter.scanned += 1
-            if node == src and (shard is None or name < shard):
-                shard = name
-        dst = None
-        for node in caps:
-            counter.scanned += 1
-            if node != src:
-                dst = node
+            while ridx < len(receivers) and receivers[ridx][1] == 0:
+                ridx += 1
+            if ridx == len(receivers):
                 break
-        if shard is None or dst is None:
-            break
-        moves.append({"shard": shard, "src": src, "dst": dst})
-        load[src] = load.get(src, 0) - 1
+            counter.scanned += 1
+            receivers[ridx][1] -= 1
+            moves.append({"shard": shard, "src": src, "dst": receivers[ridx][0]})
+            excess -= 1
     return moves
 
 
